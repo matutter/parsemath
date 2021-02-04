@@ -29,6 +29,20 @@ def test_parser(expr:str, expect:Any):
   print(expr, ' = ', result)
   assert result == expect
 
+@pytest.mark.parametrize('expr', [
+  ('1d20'),
+  ('d20'),
+  ('3d20'),
+  ('1d5 + 2'),
+  ('1d5 / 2.0'),
+  ('1d5 > 0'),
+  ('any(1d5, 1d5)'),
+  ('sum(1d5, 1d5) / 2'),
+])
+def test_dice_rolls(expr:str):
+  p = MathParser()
+  result = p.eval(expr)
+  print(expr, ' = ', result)
 
 def test_make_railroad_diagram():
   # requires pyparsing==3.0.0b2 or newer, railroad-diagrams, and jinja2

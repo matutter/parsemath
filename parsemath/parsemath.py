@@ -5,10 +5,14 @@ Adapted from: https://github.com/pyparsing/pyparsing/blob/master/examples/fourFn
 import operator
 from typing import *
 from pyparsing import (CaselessKeyword, Group, Literal, ParseException, Regex, Suppress, Word,
-                       alphanums, alphas, Forward, delimitedList)
+                       alphanums, alphas, nums, Forward, delimitedList)
 import math
 
+import random
+
 import logging
+
+from pyparsing.results import ParseResults
 
 log = logging.getLogger(__name__)
 
@@ -30,51 +34,6 @@ class MathParser:
 
     def __init__(self):
         self.stack = []
-
-        # lang vars
-        e = CaselessKeyword("E")
-        pi = CaselessKeyword("PI")
-        number = Regex(r"[+-]?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?")
-        ident = Word(alphas, alphanums + "_$")
-        plus, minus, lt, le, gt, ge, eq, ne, or_, and_ = map(Literal, [
-            '+', '-', '<', '<=', '>', '>=', '==', '!=', 'or', 'and'])
-        bi_op = plus | minus | lt | le | gt | ge | eq | ne | or_ | and_
-        mult = Literal('*')
-        div = Literal('/')
-        multop = mult | div
-        expop = Literal('^')
-        lpar = Suppress('(')
-        rpar = Suppress(')')
-        factor = Forward()
-        expr = Forward()
-        expr_list = delimitedList(Group(expr))
-
-        def insert_fn_arg_count_tuple(t: Tuple) -> None:
-            fn = t.pop(0)
-            argc = len(t[0])
-            t.insert(0, (fn, argc))
-
-        def push(tokens) -> None:
-            self.stack.append(tokens[0])
-
-        def push_unary_minus(tokens) -> None:
-            if '-' in tokens:
-                push('unary -')
-
-        fn_call = ((ident + lpar - Group(expr_list) + rpar)
-                   .setParseAction(insert_fn_arg_count_tuple))
-
-        atom = (bi_op[...] + (
-            ((fn_call | pi | e | number | ident)
-             .setParseAction(push))
-            | Group(lpar + expr + rpar)
-        ).setParseAction(push_unary_minus))
-
-        factor <<= atom + (expop + factor).setParseAction(push)[...]
-        term = factor + (multop + factor).setParseAction(push)[...]
-        expr <<= term + (bi_op + term).setParseAction(push)[...]
-
-        self.expr = expr
 
         self.binary_ops = {
             '+': operator.add,
@@ -98,6 +57,7 @@ class MathParser:
         }
 
         self.functions = {
+            'sum': lambda *a: sum(a),
             'sin': math.sin,
             'cos': math.cos,
             'tan': math.tan,
@@ -112,13 +72,95 @@ class MathParser:
             'any': lambda *a: any(a)
         }
 
+        # lang vars
+        e = CaselessKeyword("E")
+        pi = CaselessKeyword("PI")
+        number = Regex(r"[+-]?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?")
+        number.setName('Number')
+        ident = Word(alphas, alphanums + "_$")
+        ident.setName('Ident')
+        dice = Regex(r'\d?[dD]\d+')
+        dice.setName('Dice')
+        plus, minus, lt, le, gt, ge, eq, ne, or_, and_ = map(Literal, [
+            '+', '-', '<', '<=', '>', '>=', '==', '!=', 'or', 'and'])
+        bi_op = plus | minus | lt | le | gt | ge | eq | ne | or_ | and_
+        bi_op.setName('LowBinaryOp')
+        mult = Literal('*')
+        div = Literal('/')
+        multop = mult | div
+        multop.setName('MediumBinaryOp')
+        expop = Literal('^')
+        expop.setName('HighBinaryOp')
+        lpar = Suppress('(')
+        rpar = Suppress(')')
+        factor = Forward()
+        expr = Forward()
+        expr_list = delimitedList(Group(expr))
+        expr_list.setName('ExpressionList')
+
+        def dice_role(s:str) -> int:
+            s = s.lower()
+            if s.startswith('d'):
+                count = 1
+                limit = s[1:]
+            else:
+                count, limit = s.lower().split('d')
+            count = int(count)
+            limit = int(limit)
+            sum = 0
+            for _ in range(0, count):
+                roll = random.randint(1, limit)
+                sum += roll
+            return sum
+
+        def insert_fn_arg_count_tuple(t: Tuple) -> None:
+            fn = t.pop(0)
+            argc = len(t[0])
+            t.insert(0, (fn, argc))
+
+        def push(tokens) -> None:
+            self.stack.append(tokens[0])
+
+        def push_unary_minus(tokens) -> None:
+            if '-' in tokens:
+                push('unary -')
+
+        import functools
+        def push_dice(t:ParseResults) -> None:
+            self.stack.append( functools.partial(dice_role, t[0]) )
+        dice.setParseAction(push_dice)
+
+
+        fn_call = ((ident + lpar - Group(expr_list) + rpar)
+                   .setParseAction(insert_fn_arg_count_tuple))
+
+        atom = dice | (bi_op[...] + (
+            ((fn_call | pi | e | number | ident )
+             .setParseAction(push))
+            | Group(lpar + expr + rpar)
+        ).setParseAction(push_unary_minus))
+
+
+        factor <<= atom + (expop + factor).setParseAction(push)[...]
+        term = factor + (multop + factor).setParseAction(push)[...]
+        expr <<= term + (bi_op + term).setParseAction(push)[...]
+
+        self.expr = expr
+        expr.setName('Expression')
+        factor.setName('Factor')
+        atom.setName('Atom')
+        term.setName('Term')
+
     def _eval_stack(self) -> Any:
         op, num_args = self.stack.pop(), 0
         if isinstance(op, tuple):
             op, num_args = op
         if op == 'unary -':
             return -self._eval_stack()
-        if op in self.binary_ops:
+
+        if callable(op):
+            return op()
+        elif op in self.binary_ops:
             binary_op = self.binary_ops[op]
             op2 = self._eval_stack()
             op1 = self._eval_stack()
