@@ -38,12 +38,16 @@ def test_parser(expr:str, expect:Any):
   ('1d5 > 0'),
   ('any(1d5, 1d5)'),
   ('sum(1d5, 1d5) / 2'),
+  ('4d20 + 3d12'),
 ])
 def test_dice_rolls(expr:str):
   p = MathParser()
   result = p.eval(expr)
   print(expr, ' = ', result)
+  for dice in p.dice_roles:
+    print(dice.roll, dice.sum, dice.results)
 
+@pytest.mark.skip(reason='debug only')
 def test_make_railroad_diagram():
   # requires pyparsing==3.0.0b2 or newer, railroad-diagrams, and jinja2
 
