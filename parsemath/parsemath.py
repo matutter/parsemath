@@ -2,19 +2,28 @@
 Adapted from: https://github.com/pyparsing/pyparsing/blob/master/examples/fourFn.py
 """
 
-import operator
-from typing import *
-from pyparsing import (CaselessKeyword, Group, Literal, ParseException, Regex, Suppress, Word,
-                       alphanums, alphas, nums, Forward, delimitedList)
-import math
-
-import random
-
+import functools
 import logging
+import math
+import operator
+import random
+from typing import *
+from collections import namedtuple
 
+from pyparsing import (CaselessKeyword, Forward, Group, Literal,
+                       ParseException, Regex, Suppress, Word, alphanums,
+                       alphas, delimitedList)
 from pyparsing.results import ParseResults
 
 log = logging.getLogger(__name__)
+
+class DiceRolls(NamedTuple):
+    roll:str
+    results:List[int]
+
+    @property
+    def sum(self):
+        return sum(self.results)
 
 class MathParser:
     """
@@ -31,9 +40,11 @@ class MathParser:
     functions: MutableMapping[str, Callable]
     binary_ops: MutableMapping[str, Callable]
     constants: MutableMapping[str, Union[int, float]]
+    dice_roles: List[DiceRolls]
 
     def __init__(self):
         self.stack = []
+        self.dice_roles = []
 
         self.binary_ops = {
             '+': operator.add,
@@ -98,7 +109,8 @@ class MathParser:
         expr_list = delimitedList(Group(expr))
         expr_list.setName('ExpressionList')
 
-        def dice_role(s:str) -> int:
+        def dice_role(s: str) -> int:
+            rolls = DiceRolls(roll=s, results=[])
             s = s.lower()
             if s.startswith('d'):
                 count = 1
@@ -107,11 +119,11 @@ class MathParser:
                 count, limit = s.lower().split('d')
             count = int(count)
             limit = int(limit)
-            sum = 0
             for _ in range(0, count):
                 roll = random.randint(1, limit)
-                sum += roll
-            return sum
+                rolls.results.append(roll)
+            self.dice_roles.append(rolls)
+            return rolls.sum
 
         def insert_fn_arg_count_tuple(t: Tuple) -> None:
             fn = t.pop(0)
@@ -125,17 +137,15 @@ class MathParser:
             if '-' in tokens:
                 push('unary -')
 
-        import functools
-        def push_dice(t:ParseResults) -> None:
-            self.stack.append( functools.partial(dice_role, t[0]) )
+        def push_dice(t: ParseResults) -> None:
+            self.stack.append(functools.partial(dice_role, t[0]))
         dice.setParseAction(push_dice)
-
 
         fn_call = ((ident + lpar - Group(expr_list) + rpar)
                    .setParseAction(insert_fn_arg_count_tuple))
 
         atom = dice | (bi_op[...] + (
-            ((fn_call | pi | e | number | ident )
+            ((fn_call | pi | e | number | ident)
              .setParseAction(push))
             | Group(lpar + expr + rpar)
         ).setParseAction(push_unary_minus))
@@ -181,6 +191,7 @@ class MathParser:
 
     def eval(self, expression: str) -> Any:
         self.stack.clear()
+        self.dice_roles.clear()
         try:
             self.expr.parseString(expression, parseAll=True)
             val = self._eval_stack()
